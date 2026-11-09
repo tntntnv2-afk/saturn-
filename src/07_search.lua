@@ -76,9 +76,9 @@ local function jump(entry)
 	end
 	window:SelectTab(entry.Tab)
 	task.defer(function()
-		local page = entry.Tab.Page
 		local target = entry.Target
-		if target and target.Parent then
+		local page = target and target:FindFirstAncestorOfClass("ScrollingFrame")
+		if target and target.Parent and page then
 			local offset = target.AbsolutePosition.Y - page.AbsolutePosition.Y + page.CanvasPosition.Y - 60
 			S.tween(page, S.TweenSmooth, { CanvasPosition = Vector2.new(0, math.max(offset, 0)) })
 			flash(target)

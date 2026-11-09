@@ -24,7 +24,7 @@ for path in sorted((ROOT / "src").glob("*.lua")) + [ROOT / "loader.lua"]:
         if "--" in stripped:
             problems.append(f"{path.relative_to(ROOT)}:{n} has a comment")
 
-for name in ["saturn_logo_anim.png", "icons.png", "orbit_ring.png", "glide.png"]:
+for name in ["saturn_logo_anim.png", "icons.png", "icons_extra.png", "orbit_ring.png", "glide.png"]:
     if not (ROOT / "assets" / name).exists():
         problems.append("missing assets/" + name)
 

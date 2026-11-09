@@ -249,7 +249,7 @@ function S.hideOrb()
 end
 
 local function isMobile()
-	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	return UserInputService.TouchEnabled
 end
 
 function Library:Eclipse(on)
@@ -384,4 +384,279 @@ function Library:CreateLoader(options)
 		end)
 	end
 	return loader
+end
+
+Library.WatermarkEnabled = false
+Library.KeybindListEnabled = false
+
+local function popIn(frame, on)
+	local scale = frame:FindFirstChildOfClass("UIScale")
+	if on then
+		if not frame.Visible then
+			frame.Visible = true
+			if scale then
+				scale.Scale = Library.Scale * 0.94
+				S.tween(scale, S.Tween, { Scale = Library.Scale })
+			end
+		end
+	else
+		frame.Visible = false
+	end
+end
+S.ScaledHud = S.ScaledHud or {}
+
+local Watermark = S.create("Frame", {
+	Name = "Watermark",
+	Position = UDim2.fromOffset(16, 14),
+	Size = UDim2.fromOffset(0, 32),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Visible = false,
+	ZIndex = 20,
+	Theme = { BackgroundColor3 = "Panel" },
+	Parent = S.HudGui,
+}, {
+	S.corner(16),
+	S.stroke("Border"),
+	S.padding(0, 12, 0, 6),
+	S.list(10, true, { VerticalAlignment = Enum.VerticalAlignment.Center }),
+	S.create("UIScale", { Scale = 1 }),
+})
+S.Watermark = Watermark
+table.insert(S.ScaledHud, Watermark:FindFirstChildOfClass("UIScale"))
+Library:Image(Watermark, "Logo", { Size = UDim2.fromOffset(40, 20), LayoutOrder = 1, ZIndex = 21 })
+local markOrder = 1
+local function markText(text, token, font, mono)
+	markOrder += 1
+	if markOrder > 2 then
+		S.create("Frame", {
+			BorderSizePixel = 0,
+			Size = UDim2.fromOffset(1, 12),
+			LayoutOrder = markOrder,
+			ZIndex = 21,
+			Theme = { BackgroundColor3 = "BorderLight" },
+			Parent = Watermark,
+		})
+		markOrder += 1
+	end
+	return S.label({
+		Text = text,
+		FontFace = mono and S.FontMono or font or S.FontSemi,
+		TextSize = mono and 11.5 or 12,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 32),
+		LayoutOrder = markOrder,
+		ZIndex = 21,
+		Theme = { TextColor3 = token or "SubText" },
+		Parent = Watermark,
+	})
+end
+local MarkTitle = markText("Saturn", "Text", S.FontBold)
+local MarkUser = markText(Players.LocalPlayer and Players.LocalPlayer.DisplayName or "", "SubText")
+local MarkFps = markText("0 fps", "SubText", nil, true)
+local MarkPing = markText("0 ms", "SubText", nil, true)
+local MarkPlayers = markText("", "SubText")
+S.draggable(Watermark, Watermark)
+local function paintMark(perf)
+	MarkFps.Text = perf.Fps .. " fps"
+	MarkPing.Text = perf.Ping .. " ms"
+	local count = #Players:GetPlayers()
+	MarkPlayers.Text = count .. (count == 1 and " player" or " players")
+end
+paintMark(S.Perf)
+table.insert(S.PerfListeners, function(perf)
+	if Watermark.Visible then
+		paintMark(perf)
+	end
+end)
+
+function Library:SetWatermark(on, text)
+	self.WatermarkEnabled = on and true or false
+	if text then
+		MarkTitle.Text = tostring(text)
+	elseif S.Window and S.Window.TitleLabel then
+		MarkTitle.Text = S.Window.TitleLabel.Text
+	end
+	paintMark(S.Perf)
+	popIn(Watermark, self.WatermarkEnabled)
+end
+
+local KeyPanel = S.create("Frame", {
+	Name = "Keybinds",
+	Position = UDim2.new(0, 16, 0.38, 0),
+	Size = UDim2.fromOffset(220, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	Visible = false,
+	ZIndex = 20,
+	Theme = { BackgroundColor3 = "Panel" },
+	Parent = S.HudGui,
+}, { S.corner(12), S.stroke("Border"), S.create("UIScale", { Scale = 1 }) })
+S.KeybindPanel = KeyPanel
+table.insert(S.ScaledHud, KeyPanel:FindFirstChildOfClass("UIScale"))
+local KeyHead = S.create("Frame", {
+	BackgroundTransparency = 1,
+	Size = UDim2.new(1, 0, 0, 36),
+	ZIndex = 21,
+	Parent = KeyPanel,
+})
+Library:Icon(KeyHead, "keybinds", 14, {
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 12, 0.5, 0),
+	ZIndex = 21,
+	Theme = { ImageColor3 = "Silver" },
+})
+S.label({
+	Text = "KEYBINDS",
+	FontFace = S.FontBold,
+	TextSize = 11,
+	Position = UDim2.fromOffset(34, 0),
+	Size = UDim2.new(1, -90, 1, 0),
+	ZIndex = 21,
+	Theme = { TextColor3 = "Text" },
+	Parent = KeyHead,
+})
+local KeyCount = S.label({
+	Text = "0 / 0",
+	FontFace = S.FontMono,
+	TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -12, 0, 0),
+	Size = UDim2.new(0, 60, 1, 0),
+	ZIndex = 21,
+	Theme = { TextColor3 = "Muted" },
+	Parent = KeyHead,
+})
+S.create("Frame", {
+	BorderSizePixel = 0,
+	Position = UDim2.fromOffset(0, 36),
+	Size = UDim2.new(1, 0, 0, 1),
+	ZIndex = 21,
+	Theme = { BackgroundColor3 = "Border" },
+	Parent = KeyPanel,
+})
+local KeyRows = S.create("Frame", {
+	BackgroundTransparency = 1,
+	Position = UDim2.fromOffset(0, 37),
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	ZIndex = 21,
+	Parent = KeyPanel,
+}, { S.list(2), S.padding(6, 6, 7, 6) })
+S.draggable(KeyHead, KeyPanel)
+
+local MODE_SHORT = { Toggle = "toggle", Hold = "hold", Press = "press", Always = "always" }
+local keyRows = {}
+local keyPending = false
+local function renderKeybinds()
+	keyPending = false
+	for _, row in ipairs(keyRows) do
+		row:Destroy()
+	end
+	table.clear(keyRows)
+	local T = Library.Theme
+	local on = 0
+	for i, bind in ipairs(S.KeybindList) do
+		if not bind.Hidden and bind.Value ~= "None" and bind.Chip and bind.Chip.Parent then
+			local active = bind:GetState() == true
+			if active then
+				on += 1
+			end
+			local Row = S.create("Frame", {
+				Size = UDim2.new(1, 0, 0, 26),
+				LayoutOrder = i,
+				BackgroundColor3 = T.Field,
+				BackgroundTransparency = active and 0 or 1,
+				ZIndex = 21,
+				Parent = KeyRows,
+			}, { S.corner(7) })
+			if active then
+				S.create("Frame", {
+					BorderSizePixel = 0,
+					AnchorPoint = Vector2.new(0, 0.5),
+					Position = UDim2.new(0, 4, 0.5, 0),
+					Size = UDim2.fromOffset(2, 12),
+					BackgroundColor3 = T.Silver,
+					ZIndex = 22,
+					Parent = Row,
+				}, { S.corner(1) })
+			end
+			S.label({
+				Text = bind.Text,
+				TextSize = 12,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -110, 1, 0),
+				ZIndex = 22,
+				TextColor3 = active and T.Text or T.SubText,
+				Parent = Row,
+			})
+			local Right = S.create("Frame", {
+				BackgroundTransparency = 1,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -6, 0.5, 0),
+				Size = UDim2.fromOffset(0, 18),
+				AutomaticSize = Enum.AutomaticSize.X,
+				ZIndex = 22,
+				Parent = Row,
+			}, { S.list(6, true, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+			S.label({
+				Text = MODE_SHORT[bind.Mode] or "",
+				TextSize = 10.5,
+				AutomaticSize = Enum.AutomaticSize.X,
+				Size = UDim2.fromOffset(0, 18),
+				LayoutOrder = 1,
+				ZIndex = 22,
+				TextColor3 = T.Muted,
+				Parent = Right,
+			})
+			local Chip = S.create("Frame", {
+				Size = UDim2.fromOffset(0, 18),
+				AutomaticSize = Enum.AutomaticSize.X,
+				LayoutOrder = 2,
+				BackgroundColor3 = T.Off,
+				ZIndex = 22,
+				Parent = Right,
+			}, { S.corner(5), S.padding(0, 7, 0, 7) })
+			local edge = S.create("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = active and T.SilverDim or T.Border,
+				Parent = Chip,
+			})
+			edge.Thickness = 1
+			S.label({
+				Text = bind.Chip.Text,
+				FontFace = S.FontMono,
+				TextSize = 10.5,
+				AutomaticSize = Enum.AutomaticSize.X,
+				Size = UDim2.fromOffset(0, 18),
+				ZIndex = 22,
+				TextColor3 = active and T.Silver or T.SubText,
+				Parent = Chip,
+			})
+			table.insert(keyRows, Row)
+		end
+	end
+	KeyCount.Text = on .. " / " .. #keyRows
+	popIn(KeyPanel, Library.KeybindListEnabled and #keyRows > 0)
+end
+
+S.refreshKeybindList = function()
+	if keyPending then
+		return
+	end
+	keyPending = true
+	task.defer(function()
+		if not Library.Unloaded then
+			renderKeybinds()
+		end
+	end)
+end
+
+table.insert(S.ThemeCallbacks, function()
+	S.refreshKeybindList()
+end)
+
+function Library:SetKeybindList(on)
+	self.KeybindListEnabled = on and true or false
+	S.refreshKeybindList()
 end

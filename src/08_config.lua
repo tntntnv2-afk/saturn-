@@ -62,7 +62,7 @@ function Library:SaveConfig(name)
 	end
 	local data = {}
 	for id, option in pairs(self.Options) do
-		if not option.NoConfig and type(id) == "string" then
+		if not option.NoConfig and option.Save ~= false and type(id) == "string" then
 			local value = serialize(option)
 			if value ~= nil then
 				data[id] = value
@@ -70,11 +70,19 @@ function Library:SaveConfig(name)
 		end
 	end
 	S.ensureFolder(self.Folder .. "/configs")
+	local count = 0
+	for _ in pairs(data) do
+		count += 1
+	end
 	local ok, err = pcall(writefile, configPath(name), HttpService:JSONEncode({ saturn = 1, options = data }))
 	if not ok then
 		return false, tostring(err)
 	end
-	return true
+	if S.refreshConfigList then
+		S.refreshConfigList()
+	end
+	self.CurrentConfig = name
+	return true, name, count
 end
 
 function Library:LoadConfig(name)
@@ -92,19 +100,29 @@ function Library:LoadConfig(name)
 		return false, "That config file is broken"
 	end
 	local options = decoded.options or decoded
-	for id, value in pairs(options) do
-		local option = self.Options[id]
-		if option and not option.NoConfig then
-			pcall(apply, option, value)
+	local count = 0
+	for pass = 1, 2 do
+		for id, value in pairs(options) do
+			local option = self.Options[id]
+			if option and not option.NoConfig and option.Save ~= false and (option.Type == "Toggle") == (pass == 2) then
+				if pcall(apply, option, value) then
+					count += 1
+				end
+			end
 		end
 	end
-	return true
+	self.CurrentConfig = name
+	return true, count
 end
 
 function Library:DeleteConfig(name)
 	local path = configPath(name)
 	if hasFiles() and type(delfile) == "function" and isfile(path) then
-		return pcall(delfile, path)
+		local ok, err = pcall(delfile, path)
+		if S.refreshConfigList then
+			S.refreshConfigList()
+		end
+		return ok, err
 	end
 	return false
 end
@@ -133,7 +151,11 @@ function Library:SetAutoload(name)
 		return false
 	end
 	S.ensureFolder(self.Folder)
-	return pcall(writefile, self.Folder .. "/autoload.txt", tostring(name or ""))
+	local ok, err = pcall(writefile, self.Folder .. "/autoload.txt", tostring(name or ""))
+	if S.refreshConfigList then
+		S.refreshConfigList()
+	end
+	return ok, err
 end
 
 function Library:GetAutoload()
@@ -165,6 +187,25 @@ function Library:LoadAutoload()
 	return false
 end
 
+function Library:SetSilentLoad(on)
+	if not hasFiles() then
+		return false
+	end
+	S.ensureFolder(self.Folder)
+	return pcall(writefile, self.Folder .. "/silent_load.txt", on and "1" or "0")
+end
+
+function Library:GetSilentLoad()
+	if not hasFiles() then
+		return false
+	end
+	local path = self.Folder .. "/silent_load.txt"
+	local ok, value = pcall(function()
+		return isfile(path) and readfile(path) or "0"
+	end)
+	return ok and value == "1"
+end
+
 local menuFile = function()
 	return Library.Folder .. "/menu.json"
 end
@@ -178,6 +219,8 @@ function S.saveMenu()
 		starfield = Library.Starfield,
 		orbitBar = Library.OrbitBarEnabled,
 		notify = Library.NotifyEnabled,
+		watermark = Library.WatermarkEnabled,
+		keybindList = Library.KeybindListEnabled,
 		key = Library.ToggleKey and Library.ToggleKey.Name or "RightControl",
 	}
 	S.ensureFolder(Library.Folder)
@@ -194,26 +237,109 @@ function S.loadMenu()
 	return ok and type(data) == "table" and data or nil
 end
 
-function Library:BuildSettingsTab(window, options)
-	options = options or {}
+local function iconButton(parent, icon, props)
+	props = props or {}
+	local size = props.Size or 26
+	local Button = S.create("TextButton", {
+		Text = "",
+		AutoButtonColor = false,
+		AnchorPoint = props.AnchorPoint or Vector2.zero,
+		Position = props.Position or UDim2.new(),
+		Size = UDim2.fromOffset(size, size),
+		LayoutOrder = props.LayoutOrder or 0,
+		BackgroundTransparency = props.Filled and 0 or 1,
+		ZIndex = 3,
+		Theme = { BackgroundColor3 = props.Filled and "Field" or "FieldHover" },
+		Parent = parent,
+	}, { S.corner(7) })
+	local Edge = S.stroke("BorderLight")
+	Edge.Parent = Button
+	Edge.Enabled = props.Filled == true
+	local Glyph = Library:Icon(Button, icon, props.IconSize or 13, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		ZIndex = 3,
+		Theme = { ImageColor3 = props.Lit and "Silver" or "Muted" },
+	})
+	local state = { hot = false, lit = props.Lit == true, danger = false }
+	local function paint()
+		local T = Library.Theme
+		local color = state.danger and T.Danger or ((state.lit or state.hot) and (state.hot and T.Text or T.Silver) or T.Muted)
+		S.tween(Glyph, S.TweenFast, { ImageColor3 = color })
+		S.Themed[Glyph] = nil
+		if not props.Filled then
+			S.tween(Button, S.TweenFast, { BackgroundTransparency = state.hot and 0 or 1 })
+		end
+	end
+	S.bind(Button.MouseEnter, function()
+		state.hot = true
+		paint()
+	end)
+	S.bind(Button.MouseLeave, function()
+		state.hot = false
+		paint()
+	end)
+	return Button, function(key, value)
+		state[key] = value
+		paint()
+	end
+end
+S.iconButton = iconButton
+
+function Library:BuildSettingsTab(window, options, section)
+	if type(options) ~= "table" then
+		options = { Name = options, Section = section }
+	end
 	window = window or S.Window
+	if options.Section ~= false and window.Section ~= (options.Section or "Other") then
+		window:AddSection(options.Section or "Other")
+	end
 	local saved = S.loadMenu() or {}
 	local tab = window:AddTab(options.Name or "Settings", "settings")
 	local Menu = tab:AddLeftGroupbox("Menu")
 	local key = Menu:AddKeybind("Saturn_MenuKey", {
 		Text = "Menu key",
 		Default = saved.key or (self.ToggleKey and self.ToggleKey.Name) or "RightControl",
+		Mode = "Press",
+		ShowInList = false,
 	})
 	key.NoConfig = true
 	local function applyKey(value)
 		local code = value and value ~= "None" and S.keyCode(value)
 		if code then
 			self.ToggleKey = code
+		else
+			local keep = self.ToggleKey or Enum.KeyCode.RightControl
+			task.defer(function()
+				key:SetValue(keep.Name)
+			end)
+			return
 		end
 		S.saveMenu()
 	end
 	key:OnChanged(applyKey)
 	applyKey(key.Value)
+	local keyList = Menu:AddToggle("Saturn_KeybindList", { Text = "Keybind list", Default = saved.keybindList == true })
+	keyList.NoConfig, keyList.Orbit = true, false
+	keyList:OnChanged(function(v)
+		self:SetKeybindList(v)
+		S.saveMenu()
+	end)
+	self:SetKeybindList(keyList.Value)
+	local mark = Menu:AddToggle("Saturn_Watermark", { Text = "Watermark", Default = saved.watermark == true })
+	mark.NoConfig, mark.Orbit = true, false
+	mark:OnChanged(function(v)
+		self:SetWatermark(v)
+		S.saveMenu()
+	end)
+	self:SetWatermark(mark.Value)
+	if hasFiles() then
+		local silent = Menu:AddToggle("Saturn_SilentLoad", { Text = "Silent load", Default = self:GetSilentLoad() })
+		silent.NoConfig, silent.Orbit = true, false
+		silent:OnChanged(function(v)
+			self:SetSilentLoad(v)
+		end)
+	end
 	local scale = Menu:AddSlider("Saturn_Scale", {
 		Text = "Menu size",
 		Min = 70,
@@ -240,10 +366,7 @@ function Library:BuildSettingsTab(window, options)
 		S.saveMenu()
 	end)
 	self:SetStarfield(stars.Value)
-	local bar = Menu:AddToggle("Saturn_OrbitBar", {
-		Text = "Active orbit bar",
-		Default = saved.orbitBar ~= false,
-	})
+	local bar = Menu:AddToggle("Saturn_OrbitBar", { Text = "Active orbit bar", Default = saved.orbitBar ~= false })
 	bar.NoConfig, bar.Orbit = true, false
 	bar:OnChanged(function(v)
 		self:SetOrbitBar(v)
@@ -257,66 +380,215 @@ function Library:BuildSettingsTab(window, options)
 		S.saveMenu()
 	end)
 	self.NotifyEnabled = notify.Value
+	Menu:AddDivider()
 	Menu:AddButton({ Text = "Unload Saturn", DoubleClick = true, Func = function()
 		self:Unload()
 	end })
 
 	local Configs = tab:AddRightGroupbox("Configs")
-	local nameBox = Configs:AddInput("Saturn_ConfigName", { Text = "Name", Placeholder = "my config" })
-	nameBox.NoConfig = true
-	local list = Configs:AddDropdown("Saturn_ConfigList", {
-		Text = "Saved",
-		Values = self:ListConfigs(),
-		AllowNull = true,
+	if not hasFiles() then
+		Configs:AddLabel("This executor can't save files.")
+		return tab
+	end
+	local function say(message)
+		self:Notify("Configs", message, 3, "config")
+	end
+
+	local NameRow = S.row(Configs, 30)
+	local NameField = S.create("Frame", {
+		Size = UDim2.new(1, -38, 1, 0),
+		ZIndex = 2,
+		Theme = { BackgroundColor3 = "Field" },
+		Parent = NameRow,
+	}, { S.corner(7), S.stroke("BorderLight") })
+	local NameBox = S.create("TextBox", {
+		Text = "",
+		PlaceholderText = "New config",
+		ClearTextOnFocus = false,
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -20, 1, 0),
+		FontFace = S.Font,
+		TextSize = 12.5,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClipsDescendants = true,
+		ZIndex = 2,
+		Theme = { TextColor3 = "Text", PlaceholderColor3 = "Muted" },
+		Parent = NameField,
 	})
-	list.NoConfig = true
-	local auto = Configs:AddLabel("Autoload: " .. (self:GetAutoload() or "none"))
-	local function refresh()
-		list:SetValues(self:ListConfigs())
-		auto:SetText("Autoload: " .. (self:GetAutoload() or "none"))
+	local CreateButton = iconButton(NameRow, "plus", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = 30,
+		IconSize = 15,
+		Filled = true,
+	})
+	S.index(Configs, "Create config", NameRow)
+
+	local Head = S.row(Configs, 24)
+	local HeadText = S.label({
+		Text = "",
+		FontFace = S.FontSemi,
+		TextSize = 10.5,
+		Size = UDim2.new(1, -30, 1, 0),
+		ZIndex = 2,
+		Theme = { TextColor3 = "Muted" },
+		Parent = Head,
+	})
+	local RefreshButton = iconButton(Head, "refresh-cw", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.fromScale(1, 0.5),
+		Size = 22,
+		IconSize = 12,
+	})
+	local ListRow = S.row(Configs, 0)
+	ListRow.AutomaticSize = Enum.AutomaticSize.Y
+	local ListFrame = S.create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ZIndex = 2,
+		Parent = ListRow,
+	}, { S.list(5) })
+
+	local rows = {}
+	local refresh
+	local function configRow(name, index, isAuto)
+		local Row = S.create("Frame", {
+			Size = UDim2.new(1, 0, 0, 36),
+			LayoutOrder = index,
+			ZIndex = 2,
+			Theme = { BackgroundColor3 = "Field" },
+			Parent = ListFrame,
+		}, { S.corner(8), S.stroke(isAuto and "SilverDim" or "BorderLight") })
+		Library:Icon(Row, "folder", 13, {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 11, 0.5, 0),
+			ZIndex = 2,
+			Theme = { ImageColor3 = isAuto and "Silver" or "Muted" },
+		})
+		S.label({
+			Text = name,
+			FontFace = S.FontSemi,
+			TextSize = 12.5,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(32, 0),
+			Size = UDim2.new(1, -150, 1, 0),
+			ZIndex = 2,
+			Theme = { TextColor3 = isAuto and "Silver" or "Text" },
+			Parent = Row,
+		})
+		local Actions = S.create("Frame", {
+			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -5, 0.5, 0),
+			Size = UDim2.fromOffset(0, 26),
+			AutomaticSize = Enum.AutomaticSize.X,
+			ZIndex = 2,
+			Parent = Row,
+		}, { S.list(2, true, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+		local Load = iconButton(Actions, "play", { LayoutOrder = 1 })
+		local Save = iconButton(Actions, "save", { LayoutOrder = 2 })
+		local Star = iconButton(Actions, "star", { LayoutOrder = 3, Lit = isAuto })
+		local Delete, setDelete = iconButton(Actions, "trash-2", { LayoutOrder = 4 })
+		S.bind(Load.MouseButton1Click, function()
+			local ok, result = self:LoadConfig(name)
+			say(ok and ("Loaded " .. name .. " (" .. tostring(result) .. ")") or tostring(result))
+		end)
+		S.bind(Save.MouseButton1Click, function()
+			local ok, result, count = self:SaveConfig(name)
+			say(ok and ("Saved " .. name .. " (" .. tostring(count) .. ")") or tostring(result))
+			refresh()
+		end)
+		S.bind(Star.MouseButton1Click, function()
+			if isAuto then
+				self:SetAutoload("")
+				say(name .. " won't load on start")
+			else
+				self:SetAutoload(name)
+				say(name .. " loads on start")
+			end
+			refresh()
+		end)
+		local armedUntil = 0
+		S.bind(Delete.MouseButton1Click, function()
+			if os.clock() > armedUntil then
+				armedUntil = os.clock() + 2.5
+				setDelete("danger", true)
+				task.delay(2.5, function()
+					if os.clock() >= armedUntil and Delete.Parent then
+						setDelete("danger", false)
+					end
+				end)
+				return
+			end
+			self:DeleteConfig(name)
+			if isAuto then
+				self:SetAutoload("")
+			end
+			say("Deleted " .. name)
+			refresh()
+		end)
+		return Row
 	end
-	local function chosen()
-		local name = nameBox.Value ~= "" and nameBox.Value or list.Value
-		return name and tostring(name) or nil
+	refresh = function()
+		for _, row in ipairs(rows) do
+			row:Destroy()
+		end
+		table.clear(rows)
+		local names = self:ListConfigs()
+		local current = self:GetAutoload()
+		HeadText.Text = "SAVED CONFIGS  ·  " .. #names
+		for i, name in ipairs(names) do
+			table.insert(rows, configRow(name, i, name == current))
+		end
+		if #names == 0 then
+			table.insert(rows, S.label({
+				Text = "None yet",
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Size = UDim2.new(1, 0, 0, 34),
+				ZIndex = 2,
+				Theme = { TextColor3 = "Muted" },
+				Parent = ListFrame,
+			}))
+		end
 	end
-	Configs:AddButton({ Text = "Save", Func = function()
-		local name = chosen()
-		local ok, err = self:SaveConfig(name)
-		self:Notify("Configs", ok and ("Saved " .. tostring(name)) or tostring(err), 3, "config")
-		refresh()
-	end })
-	Configs:AddButton({ Text = "Load", Func = function()
-		local name = list.Value or chosen()
-		if not name then
-			self:Notify("Configs", "Pick a config first", 3, "config")
+	local function create()
+		local name = tostring(NameBox.Text or ""):gsub("[^%w%s%-_]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if name == "" then
+			say("Type a name first")
 			return
 		end
-		local ok, err = self:LoadConfig(name)
-		self:Notify("Configs", ok and ("Loaded " .. name) or tostring(err), 3, "config")
-	end })
-	Configs:AddButton({ Text = "Set as autoload", Func = function()
-		local name = list.Value or chosen()
-		if not name then
-			self:Notify("Configs", "Pick a config first", 3, "config")
+		local ok, result = self:SaveConfig(name)
+		if not ok then
+			say(tostring(result))
 			return
 		end
-		self:SetAutoload(name)
+		NameBox.Text = ""
+		say("Saved " .. name)
 		refresh()
-		self:Notify("Configs", name .. " loads automatically now", 3, "config")
-	end })
-	Configs:AddButton({ Text = "Delete", DoubleClick = true, Func = function()
-		local name = list.Value
-		if not name then
-			self:Notify("Configs", "Pick a config first", 3, "config")
+	end
+	S.connect(CreateButton.MouseButton1Click, create)
+	S.connect(NameBox.FocusLost, function(enter)
+		if enter then
+			create()
+		end
+	end)
+	S.connect(RefreshButton.MouseButton1Click, refresh)
+	local pending = false
+	S.refreshConfigList = function()
+		if pending then
 			return
 		end
-		self:DeleteConfig(name)
-		if self:GetAutoload() == name then
-			self:SetAutoload("")
-		end
-		refresh()
-		self:Notify("Configs", "Deleted " .. name, 3, "config")
-	end })
-	Configs:AddButton({ Text = "Refresh list", Func = refresh })
+		pending = true
+		task.defer(function()
+			pending = false
+			if HeadText.Parent then
+				refresh()
+			end
+		end)
+	end
+	refresh()
 	return tab
 end

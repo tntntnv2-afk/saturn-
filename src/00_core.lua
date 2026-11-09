@@ -14,7 +14,7 @@ local LocalPlayer = Players.LocalPlayer
 
 local Library = {
 	Name = "Saturn",
-	Version = "1.0.0",
+	Version = "1.1.0",
 	Repo = "https://raw.githubusercontent.com/tntntnv2-afk/saturn-/main/",
 	Folder = "Saturn",
 	Options = {},
@@ -50,6 +50,7 @@ local S = {
 	Connections = {},
 	UnloadCallbacks = {},
 	Themed = {},
+	ThemeCallbacks = {},
 	Loops = {},
 	SearchIndex = {},
 	ActiveToggles = {},
@@ -267,6 +268,28 @@ function S.unloop(fn)
 	end
 end
 
+S.Perf = { Fps = 0, Ping = 0 }
+S.PerfListeners = {}
+do
+	local frames, elapsed = 0, 0
+	S.connect(RunService.RenderStepped, function(dt)
+		frames += 1
+		elapsed += dt
+		if elapsed < 0.5 then
+			return
+		end
+		S.Perf.Fps = math.floor(frames / elapsed + 0.5)
+		frames, elapsed = 0, 0
+		local ok, seconds = pcall(function()
+			return Players.LocalPlayer:GetNetworkPing()
+		end)
+		S.Perf.Ping = ok and type(seconds) == "number" and math.floor(seconds * 1000 + 0.5) or S.Perf.Ping
+		for _, fn in ipairs(S.PerfListeners) do
+			pcall(fn, S.Perf)
+		end
+	end)
+end
+
 S.connect(RunService.RenderStepped, function(dt)
 	for i = #S.Loops, 1, -1 do
 		local fn = S.Loops[i]
@@ -330,7 +353,7 @@ end
 
 function S.draggable(handle, target, onMoved)
 	local pressed, start, origin
-	S.connect(handle.InputBegan, function(input)
+	local began = S.connect(handle.InputBegan, function(input)
 		if S.isPress(input) and not pressed then
 			pressed = input
 			start = input.Position
@@ -347,12 +370,16 @@ function S.draggable(handle, target, onMoved)
 			end)
 		end
 	end)
-	S.connect(UserInputService.InputChanged, function(input)
+	local moved = S.connect(UserInputService.InputChanged, function(input)
 		if pressed and S.isMove(input, pressed) then
 			local delta = input.Position - start
 			target.Position = UDim2.new(origin.X.Scale, origin.X.Offset + delta.X, origin.Y.Scale, origin.Y.Offset + delta.Y)
 		end
 	end)
+	return function()
+		began:Disconnect()
+		moved:Disconnect()
+	end
 end
 
 function Library:SetTheme(changes)
@@ -372,6 +399,9 @@ function Library:SetTheme(changes)
 				end)
 			end
 		end
+	end
+	for _, fn in ipairs(S.ThemeCallbacks) do
+		pcall(fn)
 	end
 end
 

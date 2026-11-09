@@ -50,6 +50,8 @@ local Stack = S.create("Frame", {
 S.NotifyStack = Stack
 local notifyOrder = 0
 
+local activeNotes = {}
+
 function Library:Notify(title, text, duration, icon)
 	if type(title) == "table" then
 		local o = title
@@ -58,10 +60,14 @@ function Library:Notify(title, text, duration, icon)
 	if not self.NotifyEnabled or self.Unloaded then
 		return
 	end
-	if text == nil then
+	if text == nil or (type(text) == "number" and duration == nil) then
+		duration = duration or (type(text) == "number" and text or nil)
 		text, title = title, "Saturn"
 	end
 	duration = tonumber(duration) or 4
+	while #activeNotes >= 5 do
+		table.remove(activeNotes, 1).Close()
+	end
 	notifyOrder += 1
 	local Slot = S.create("Frame", {
 		BackgroundTransparency = 1,
@@ -125,12 +131,17 @@ function Library:Notify(title, text, duration, icon)
 	S.tween(Card, S.TweenSmooth, { Position = UDim2.new(), GroupTransparency = 0 })
 	local started = os.clock()
 	local alive = true
+	local note = {}
 	local step
 	local function close()
 		if not alive then
 			return
 		end
 		alive = false
+		local i = table.find(activeNotes, note)
+		if i then
+			table.remove(activeNotes, i)
+		end
 		S.unloop(step)
 		S.tween(Card, S.Tween, { Position = UDim2.fromOffset(40, 0), GroupTransparency = 1 })
 		task.delay(0.2, function()
@@ -155,5 +166,7 @@ function Library:Notify(title, text, duration, icon)
 		Parent = Slot,
 	})
 	S.bind(Hit.MouseButton1Click, close)
-	return { Close = close }
+	note.Close = close
+	table.insert(activeNotes, note)
+	return note
 end

@@ -108,6 +108,15 @@ S.loop(function(dt)
 	end
 end)
 
+function Library:PreloadAssets(names)
+	names = names or { "Logo", "Icons", "IconsExtra", "Ring", "Glide" }
+	for _, name in ipairs(names) do
+		task.spawn(function()
+			self:GetAsset(name)
+		end)
+	end
+end
+
 function Library:Animate(image, sheet)
 	assert(sheet and sheet.Width and sheet.Height and sheet.Columns and sheet.Frames, "sprite sheet needs Width, Height, Columns, Frames")
 	image.ImageRectSize = Vector2.new(sheet.Width, sheet.Height)
@@ -177,18 +186,70 @@ S.ICON_ALIASES = {
 	target = "aim", save = "config", heart = "credits", x = "close",
 }
 
+S.EXTRA_ICON_COLUMNS = 16
+S.EXTRA_ICON_NAMES = {
+	"sprout", "sword", "swords", "crosshair", "map-pin", "layout-grid", "settings", "star", "search", "x",
+	"minus", "chevron-down", "chevron-right", "chevron-up", "chevron-left", "check", "eye", "eye-off", "user",
+	"users", "zap", "shield", "target", "flame", "skull", "coins", "clock", "trophy", "package", "gem", "heart",
+	"bell", "info", "triangle-alert", "lock", "lock-open", "refresh-cw", "play", "pause", "square", "plus",
+	"copy", "trash-2", "folder", "save", "download", "upload", "palette", "monitor", "keyboard",
+	"mouse-pointer-2", "wand-sparkles", "bot", "ghost", "footprints", "wind", "axe", "hammer", "compass", "globe",
+	"server", "wifi", "activity", "chart-column", "list", "sliders-horizontal", "toggle-right", "sparkles",
+	"moon", "sun", "droplet", "fish", "tree-pine", "mountain", "cloud", "store", "shopping-cart", "gift", "crown",
+	"medal", "book-open", "scroll-text", "message-square", "link", "external-link", "log-out", "power",
+	"rotate-ccw", "maximize-2", "minimize-2", "grip-vertical", "menu", "filter", "house", "circle-help",
+	"circle-check", "circle-x", "flag", "bomb", "rocket", "pickaxe", "backpack", "dices", "sparkle", "shirt",
+	"car", "plane", "anchor", "bug", "code", "terminal", "command", "fingerprint", "radar", "scan", "locate",
+	"navigation", "route", "timer", "hourglass", "calendar", "award", "badge-check", "box", "boxes", "shuffle",
+	"repeat", "infinity", "skip-forward", "fast-forward", "mic", "volume-2", "volume-x", "image", "camera",
+	"video", "music", "gamepad-2", "joystick"
+}
+S.EXTRA_ICON_INDEX = {}
+for i, name in ipairs(S.EXTRA_ICON_NAMES) do
+	S.EXTRA_ICON_INDEX[name] = i - 1
+end
+Library:DefineAsset("IconsExtra", { Path = "assets/icons_extra.png", Version = 1 })
+
+function S.iconInfo(name)
+	local index = S.ICON_INDEX[name] or S.ICON_INDEX[S.ICON_ALIASES[name] or ""]
+	if index then
+		return "Icons", Vector2.new((index % S.ICON_COLUMNS) * S.ICON_SIZE, math.floor(index / S.ICON_COLUMNS) * S.ICON_SIZE)
+	end
+	local extra = S.EXTRA_ICON_INDEX[name]
+	if extra then
+		return "IconsExtra", Vector2.new((extra % S.EXTRA_ICON_COLUMNS) * S.ICON_SIZE, math.floor(extra / S.EXTRA_ICON_COLUMNS) * S.ICON_SIZE)
+	end
+	index = S.ICON_INDEX.misc
+	return "Icons", Vector2.new((index % S.ICON_COLUMNS) * S.ICON_SIZE, math.floor(index / S.ICON_COLUMNS) * S.ICON_SIZE)
+end
+
 function S.iconRect(name)
-	local index = S.ICON_INDEX[name] or S.ICON_INDEX[S.ICON_ALIASES[name] or ""] or S.ICON_INDEX.misc
-	return Vector2.new((index % S.ICON_COLUMNS) * S.ICON_SIZE, math.floor(index / S.ICON_COLUMNS) * S.ICON_SIZE)
+	local _, rect = S.iconInfo(name)
+	return rect
+end
+
+local function loadIconSheet(icon, sheet)
+	icon:SetAttribute("SaturnSheet", sheet)
+	task.spawn(function()
+		local id = Library:GetAsset(sheet)
+		if id and icon.Parent and icon:GetAttribute("SaturnSheet") == sheet then
+			icon.Image = id
+		end
+	end)
+end
+
+function Library:HasIcon(name)
+	return S.ICON_INDEX[name] ~= nil or S.ICON_ALIASES[name] ~= nil or S.EXTRA_ICON_INDEX[name] ~= nil
 end
 
 function Library:Icon(parent, name, size, props)
 	props = props or {}
+	local sheet, rect = S.iconInfo(name)
 	local base = {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(size or 16, size or 16),
 		ImageRectSize = Vector2.new(S.ICON_SIZE, S.ICON_SIZE),
-		ImageRectOffset = S.iconRect(name),
+		ImageRectOffset = rect,
 		ScaleType = Enum.ScaleType.Fit,
 		Image = "",
 		Parent = parent,
@@ -200,15 +261,15 @@ function Library:Icon(parent, name, size, props)
 		base.Theme = { ImageColor3 = "Muted" }
 	end
 	local icon = S.create("ImageLabel", base)
-	task.spawn(function()
-		local id = self:GetAsset("Icons")
-		if id and icon.Parent then
-			icon.Image = id
-		end
-	end)
+	loadIconSheet(icon, sheet)
 	return icon
 end
 
 function Library:SetIcon(icon, name)
-	icon.ImageRectOffset = S.iconRect(name)
+	local sheet, rect = S.iconInfo(name)
+	icon.ImageRectOffset = rect
+	if icon:GetAttribute("SaturnSheet") ~= sheet then
+		icon.Image = ""
+		loadIconSheet(icon, sheet)
+	end
 end

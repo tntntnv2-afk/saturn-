@@ -86,9 +86,18 @@ function S.textBlock(parent, text, description, rightInset)
 		Parent = Holder,
 	})
 	local Desc
-	if description and description ~= "" then
+	local function setDesc(value)
+		value = value and tostring(value) or ""
+		if Desc then
+			Desc.Text = value
+			Desc.Visible = value ~= ""
+			return
+		end
+		if value == "" then
+			return
+		end
 		Desc = S.label({
-			Text = description,
+			Text = value,
 			TextSize = 11,
 			TextWrapped = true,
 			Size = UDim2.new(1, 0, 0, 0),
@@ -101,18 +110,35 @@ function S.textBlock(parent, text, description, rightInset)
 		parent.AutomaticSize = Enum.AutomaticSize.Y
 		Holder.AutomaticSize = Enum.AutomaticSize.Y
 		Holder:FindFirstChildOfClass("UIListLayout").VerticalAlignment = Enum.VerticalAlignment.Top
-		Holder.Size = UDim2.new(1, -(rightInset or 0), 0, 0)
+		Holder.Size = UDim2.new(Holder.Size.X.Scale, Holder.Size.X.Offset, 0, 0)
 		parent.Size = UDim2.new(1, 0, 0, 0)
 		S.create("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = parent })
 	end
-	return Label, Desc, Holder
+	setDesc(description)
+	return Label, Desc, Holder, setDesc
 end
 
-function S.register(id, option, kind)
+function S.chainAddons(addon, owner)
+	function addon:AddKeybind(...)
+		return owner:AddKeybind(...)
+	end
+	function addon:AddColorPicker(...)
+		return owner:AddColorPicker(...)
+	end
+	return addon
+end
+
+function S.register(id, option, kind, options)
 	option.Type = kind
 	option.Id = id
 	option.Changed = option.Changed or {}
+	if options and options.Save == false then
+		option.Save = false
+	end
 	if id ~= nil then
+		if Library.Options[id] then
+			warn("[Saturn] duplicate option id " .. tostring(id))
+		end
 		Library.Options[id] = option
 		if kind == "Toggle" then
 			Library.Toggles[id] = option
@@ -121,10 +147,10 @@ function S.register(id, option, kind)
 	return option
 end
 
-function S.fire(option)
-	S.safe(option.Callback, option.Value)
+function S.fire(option, ...)
+	S.safe(option.Callback, option.Value, ...)
 	for _, fn in ipairs(option.Changed) do
-		S.safe(fn, option.Value)
+		S.safe(fn, option.Value, ...)
 	end
 end
 
@@ -145,16 +171,64 @@ function S.index(box, text, target, extra)
 	})
 end
 
-function Groupbox:AddDivider()
+function Groupbox:Expand()
+	return self
+end
+
+function Groupbox:SetTitle(text)
+	self.Name = tostring(text)
+	self.Header.Text = string.upper(self.Name)
+end
+
+function Groupbox:AddDivider(text)
+	if text and text ~= "" then
+		local Row = S.row(self, 26)
+		local function line(left)
+			local Line = S.create("Frame", {
+				BorderSizePixel = 0,
+				AnchorPoint = Vector2.new(left and 0 or 1, 0.5),
+				Position = UDim2.fromScale(left and 0 or 1, 0.5),
+				Size = UDim2.new(0.5, -(S.textWidth(text, 11, S.FontSemi) / 2 + 10), 0, 1),
+				ZIndex = 2,
+				Theme = { BackgroundColor3 = "BorderLight" },
+				Parent = Row,
+			})
+			S.create("UIGradient", {
+				Transparency = NumberSequence.new(left and 1 or 0, left and 0 or 1),
+				Parent = Line,
+			})
+		end
+		line(true)
+		line(false)
+		S.label({
+			Text = string.upper(tostring(text)),
+			FontFace = S.FontSemi,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 2,
+			Theme = { TextColor3 = "Muted" },
+			Parent = Row,
+		})
+		return Row
+	end
 	local Row = S.row(self, 9)
-	S.create("Frame", {
+	local Line = S.create("Frame", {
 		BorderSizePixel = 0,
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.fromScale(0, 0.5),
 		Size = UDim2.new(1, 0, 0, 1),
 		ZIndex = 2,
-		Theme = { BackgroundColor3 = "Border" },
+		Theme = { BackgroundColor3 = "BorderLight" },
 		Parent = Row,
+	})
+	S.create("UIGradient", {
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(0.7, 0.4),
+			NumberSequenceKeypoint.new(1, 1),
+		}),
+		Parent = Line,
 	})
 	return Row
 end
@@ -165,22 +239,194 @@ function Groupbox:AddLabel(text, wrap)
 		Text = tostring(text or ""),
 		TextSize = 12.5,
 		TextWrapped = wrap ~= false,
+		RichText = true,
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		ZIndex = 2,
-		Theme = { TextColor3 = "Muted" },
+		Theme = { TextColor3 = "SubText" },
 		Parent = Row,
 	})
 	Row.Size = UDim2.new(1, 0, 0, 0)
 	Row.AutomaticSize = Enum.AutomaticSize.Y
 	S.create("UIPadding", { PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 3), Parent = Row })
-	local object = { Row = Row, Label = Label }
+	local box = self
+	local Right
+	local object = { Row = Row, Label = Label, Text = tostring(text or "") }
+	local function slots()
+		if not Right then
+			Right = S.create("Frame", {
+				BackgroundTransparency = 1,
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, 0, 0, 0),
+				Size = UDim2.fromOffset(0, 18),
+				AutomaticSize = Enum.AutomaticSize.X,
+				ZIndex = 3,
+				Parent = Row,
+			}, { S.list(6, true, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+			S.connect(Right:GetPropertyChangedSignal("AbsoluteSize"), function()
+				local scale = S.Window and math.max(S.Window.ScaleObject.Scale, 0.1) or 1
+				Label.Size = UDim2.new(1, -(Right.AbsoluteSize.X / scale + 10), 0, 0)
+			end)
+			Label.Size = UDim2.new(1, -40, 0, 0)
+		end
+		return Right
+	end
 	function object:SetText(value)
-		Label.Text = tostring(value)
+		self.Text = tostring(value)
+		Label.Text = self.Text
 	end
 	function object:SetVisible(on)
 		Row.Visible = on
 	end
+	function object:AddColorPicker(id, options)
+		options = options or {}
+		options.Parent = slots()
+		options.Title = options.Title or object.Text
+		return S.chainAddons(S.makeColorPicker(box, id, options), object)
+	end
+	function object:AddKeybind(id, options)
+		options = options or {}
+		options.Parent = slots()
+		options.Text = options.Text or object.Text
+		return S.chainAddons(S.makeKeybind(box, id, options), object)
+	end
+	return object
+end
+
+function Groupbox:AddCustom(height)
+	local Row = S.row(self, height or 120)
+	return S.create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		ClipsDescendants = true,
+		ZIndex = 2,
+		Parent = Row,
+	})
+end
+
+function Groupbox:AddStats(stats)
+	stats = stats or {}
+	local Row = S.row(self, 52)
+	local Strip = S.create("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 2,
+		Parent = Row,
+	}, { S.list(6, true) })
+	local count = math.max(#stats, 1)
+	local cells = {}
+	for i, stat in ipairs(stats) do
+		local Cell = S.create("Frame", {
+			Size = UDim2.new(1 / count, -math.ceil(6 * (count - 1) / count), 1, 0),
+			LayoutOrder = i,
+			ZIndex = 2,
+			Theme = { BackgroundColor3 = "Field" },
+			Parent = Strip,
+		}, { S.corner(8), S.stroke("BorderLight"), S.padding(7, 9, 6, 9) })
+		local name = stat.Label or stat[1] or ""
+		S.label({
+			Text = string.upper(tostring(name)),
+			FontFace = S.FontSemi,
+			TextSize = 10,
+			Size = UDim2.new(1, 0, 0, 13),
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 2,
+			Theme = { TextColor3 = "Muted" },
+			Parent = Cell,
+		})
+		local Value = S.label({
+			Text = tostring(stat.Value or stat[2] or "0"),
+			FontFace = S.FontSemi,
+			TextSize = 15,
+			TextScaled = true,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 20),
+			ZIndex = 2,
+			Theme = { TextColor3 = stat.Accent and "Silver" or "Text" },
+			Parent = Cell,
+		})
+		S.create("UITextSizeConstraint", { MaxTextSize = 15, MinTextSize = 9, Parent = Value })
+		if stat.Accent then
+			Value.FontFace = S.FontBold
+		end
+		cells[i] = Value
+		cells[name] = Value
+	end
+	local object = { Row = Row }
+	function object:Set(key, value)
+		local label = cells[key]
+		if label then
+			label.Text = tostring(value)
+		end
+	end
+	function object:SetVisible(on)
+		Row.Visible = on
+	end
+	return object
+end
+
+function Groupbox:AddProgress(id, options)
+	if type(id) == "table" then
+		id, options = nil, id
+	end
+	options = options or {}
+	local Row = S.row(self, 36)
+	local Label = S.label({
+		Text = tostring(options.Text or id or ""),
+		TextSize = 13,
+		Size = UDim2.new(1, -60, 0, 20),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 2,
+		Theme = { TextColor3 = "SubText" },
+		Parent = Row,
+	})
+	local Percent = S.label({
+		Text = "",
+		FontFace = S.FontSemi,
+		TextSize = 12.5,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.fromOffset(60, 20),
+		ZIndex = 2,
+		Theme = { TextColor3 = "Text" },
+		Parent = Row,
+	})
+	local Bar = S.create("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, -4),
+		Size = UDim2.new(1, 0, 0, 6),
+		ZIndex = 2,
+		Theme = { BackgroundColor3 = "Off" },
+		Parent = Row,
+	}, { S.corner(3) })
+	local Fill = S.create("Frame", {
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		ZIndex = 3,
+		Parent = Bar,
+	}, { S.corner(3) })
+	S.silverFill(Fill)
+	local object = { Value = 0, Row = Row }
+	function object:SetValue(value, instant)
+		value = math.clamp(tonumber(value) or 0, 0, 1)
+		self.Value = value
+		Percent.Text = options.Format and tostring(options.Format(value)) or (math.floor(value * 100 + 0.5) .. "%")
+		if instant then
+			Fill.Size = UDim2.fromScale(value, 1)
+		else
+			S.tween(Fill, S.TweenSmooth, { Size = UDim2.fromScale(value, 1) })
+		end
+	end
+	function object:SetText(value)
+		Label.Text = tostring(value or "")
+	end
+	function object:SetVisible(on)
+		Row.Visible = on
+	end
+	object:SetValue(options.Value or options.Default or 0, true)
+	S.index(self, options.Text or id or "Progress", Row)
 	return object
 end
 
@@ -235,10 +481,12 @@ function Groupbox:AddButton(a, b)
 	local func = options.Func or options.Callback
 	local Row
 	local Button
+	local describe
 	if options.Label then
 		Row = S.row(self, ROW_H + 2)
 		local width = math.max(S.textWidth(text, 12.5, S.FontSemi) + 24, 64)
-		S.textBlock(Row, options.Label, options.Description, width + 10)
+		local _, _, _, setDesc = S.textBlock(Row, options.Label, options.Description, width + 10)
+		describe = setDesc
 		Button = S.button(Row, text, {
 			AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, 0, 0.5, 0),
@@ -255,6 +503,11 @@ function Groupbox:AddButton(a, b)
 		S.index(self, text, Row)
 	end
 	local object = { Row = Row, Button = Button, Func = func }
+	function object:SetDescription(value)
+		if describe then
+			describe(value)
+		end
+	end
 	local armed = 0
 	S.connect(Button.MouseButton1Click, function()
 		if options.DoubleClick then
@@ -302,7 +555,7 @@ function Groupbox:AddToggle(id, options)
 		ZIndex = 2,
 		Parent = Row,
 	})
-	local Label, _, TextHolder = S.textBlock(Row, options.Text or tostring(id), options.Description, 48)
+	local Label, _, TextHolder, setDesc = S.textBlock(Row, options.Text or tostring(id), options.Description, 48)
 	local Right = S.create("Frame", {
 		BackgroundTransparency = 1,
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -353,7 +606,7 @@ function Groupbox:AddToggle(id, options)
 		Addons = {},
 		Orbit = options.Orbit,
 	}, { __index = OptionBase })
-	S.register(id, toggle, "Toggle")
+	S.register(id, toggle, "Toggle", options)
 
 	local function display(instant)
 		local on = toggle.Value
@@ -369,6 +622,9 @@ function Groupbox:AddToggle(id, options)
 		S.Themed[Label] = { TextColor3 = on and "Text" or "SubText" }
 	end
 
+	function toggle:SetDescription(value)
+		setDesc(value)
+	end
 	function toggle:SetValue(value)
 		value = value and true or false
 		if self.Value == value then
@@ -379,6 +635,9 @@ function Groupbox:AddToggle(id, options)
 		display(false)
 		if S.orbitChanged then
 			S.orbitChanged(self)
+		end
+		if #self.Addons > 0 then
+			S.refreshKeybindList()
 		end
 		S.fire(self)
 	end
@@ -413,7 +672,7 @@ function Groupbox:AddToggle(id, options)
 		keyOptions.Text = keyOptions.Text or self.Text
 		local bind = S.makeKeybind(self.Groupbox, keyId, keyOptions)
 		table.insert(self.Addons, bind)
-		return self
+		return S.chainAddons(bind, self)
 	end
 	function toggle:AddColorPicker(colorId, colorOptions)
 		colorOptions = colorOptions or {}
@@ -421,7 +680,7 @@ function Groupbox:AddToggle(id, options)
 		colorOptions.Title = colorOptions.Title or self.Text
 		local picker = S.makeColorPicker(self.Groupbox, colorId, colorOptions)
 		table.insert(self.Addons, picker)
-		return self
+		return S.chainAddons(picker, self)
 	end
 	S.index(self, toggle.Text, Row, options.Description)
 	return toggle
@@ -498,7 +757,7 @@ function Groupbox:AddSlider(id, options)
 		Callback = options.Callback,
 		Row = Row,
 	}, { __index = OptionBase })
-	S.register(id, slider, "Slider")
+	S.register(id, slider, "Slider", options)
 
 	local function round(v)
 		if rounding <= 0 then
@@ -597,11 +856,15 @@ end
 function Groupbox:AddInput(id, options)
 	options = options or {}
 	local Row = S.row(self, ROW_H + 2)
-	S.textBlock(Row, options.Text or tostring(id), options.Description, 160)
+	local titled = options.Text ~= nil and options.Text ~= ""
+	local setDesc = function() end
+	if titled then
+		setDesc = select(4, S.textBlock(Row, options.Text, options.Description, 160))
+	end
 	local Field = S.create("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.new(0.5, 0, 0, 26),
+		Size = titled and UDim2.new(0.5, 0, 0, 26) or UDim2.new(1, 0, 0, 28),
 		ZIndex = 2,
 		Theme = { BackgroundColor3 = "Field" },
 		Parent = Row,
@@ -626,7 +889,10 @@ function Groupbox:AddInput(id, options)
 		Callback = options.Callback,
 		Row = Row,
 	}, { __index = OptionBase })
-	S.register(id, input, "Input")
+	S.register(id, input, "Input", options)
+	function input:SetDescription(value)
+		setDesc(value)
+	end
 	local function accept(text)
 		if options.Numeric then
 			text = text:gsub("[^%d%.%-]", "")

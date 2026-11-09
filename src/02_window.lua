@@ -4,6 +4,7 @@ S.HudGui = S.screenGui("SaturnHud", 8990)
 
 local TITLE_H = 48
 local RAIL_H = 44
+local FOOT_H = 28
 
 local Window = {}
 Window.__index = Window
@@ -95,9 +96,11 @@ function Library:CreateWindow(options)
 	if options.ToggleKey then
 		self.ToggleKey = S.keyCode(options.ToggleKey) or self.ToggleKey
 	end
-	local width = options.Width or 760
-	local height = options.Height or 500
-	local self_ = setmetatable({ Tabs = {}, Library = self }, Window)
+	local view = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+	local fit = math.max(self.Scale, 0.1)
+	local width = math.floor(math.min(options.Width or 760, (view.X - 24) / fit))
+	local height = math.floor(math.min(options.Height or 500, (view.Y - 24) / fit))
+	local self_ = setmetatable({ Tabs = {}, Library = self, TabIcons = options.TabIcons }, Window)
 	S.Window = self_
 
 	local Main = S.create("Frame", {
@@ -112,7 +115,7 @@ function Library:CreateWindow(options)
 	self_.Main = Main
 	local Scale = S.create("UIScale", { Scale = self.Scale, Parent = Main })
 	self_.ScaleObject = Scale
-	S.create("UISizeConstraint", { MinSize = Vector2.new(520, 340), Parent = Main })
+	S.create("UISizeConstraint", { MinSize = Vector2.new(math.min(520, width), math.min(340, height)), Parent = Main })
 
 	local Inner = S.create("Frame", {
 		Name = "Inner",
@@ -155,8 +158,12 @@ function Library:CreateWindow(options)
 		Parent = Brand,
 	})
 	self_.TitleLabel = TitleText
+	local gameText = options.Subtitle
+	if gameText == nil then
+		gameText = options.Game
+	end
 	local Sub = S.label({
-		Text = tostring(options.Subtitle or ""),
+		Text = gameText and tostring(gameText) or "",
 		TextSize = 12,
 		AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromOffset(0, 20),
@@ -166,7 +173,7 @@ function Library:CreateWindow(options)
 		Parent = Brand,
 	})
 	self_.SubLabel = Sub
-	if options.Subtitle == nil then
+	if gameText == nil then
 		task.spawn(function()
 			local ok, info = pcall(function()
 				return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
@@ -282,12 +289,124 @@ function Library:CreateWindow(options)
 		Name = "Pages",
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(0, TITLE_H + RAIL_H + 2),
-		Size = UDim2.new(1, 0, 1, -(TITLE_H + RAIL_H + 2)),
+		Size = UDim2.new(1, 0, 1, -(TITLE_H + RAIL_H + 3 + FOOT_H)),
 		ClipsDescendants = true,
 		ZIndex = 2,
 		Parent = Inner,
 	})
 	self_.Pages = Pages
+
+	S.create("Frame", {
+		BorderSizePixel = 0,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, -FOOT_H),
+		Size = UDim2.new(1, 0, 0, 1),
+		ZIndex = 2,
+		Theme = { BackgroundColor3 = "Border" },
+		Parent = Inner,
+	})
+	local Foot = S.create("Frame", {
+		Name = "Status",
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1),
+		Size = UDim2.new(1, 0, 0, FOOT_H),
+		ZIndex = 2,
+		Parent = Inner,
+	})
+	S.create("Frame", {
+		BackgroundTransparency = 0.35,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 1,
+		Theme = { BackgroundColor3 = "Chrome" },
+		Parent = Foot,
+	}, { S.corner(14) })
+	S.create("Frame", {
+		BorderSizePixel = 0,
+		BackgroundTransparency = 0.35,
+		Size = UDim2.new(1, 0, 0, 14),
+		ZIndex = 1,
+		Theme = { BackgroundColor3 = "Chrome" },
+		Parent = Foot,
+	})
+	local FootLeft = S.create("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(0.6, -12, 1, 0),
+		ClipsDescendants = true,
+		ZIndex = 2,
+		Parent = Foot,
+	}, { S.list(8, true, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	local function footText(parent, text, order, token, font)
+		return S.label({
+			Text = text or "",
+			TextSize = 11.5,
+			FontFace = font or S.Font,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, FOOT_H),
+			LayoutOrder = order,
+			ZIndex = 2,
+			Theme = { TextColor3 = token or "Muted" },
+			Parent = parent,
+		})
+	end
+	local LocalPlayer = Players.LocalPlayer
+	if options.User ~= false and LocalPlayer then
+		local Avatar = S.create("ImageLabel", {
+			Size = UDim2.fromOffset(18, 18),
+			LayoutOrder = 1,
+			ZIndex = 2,
+			Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(LocalPlayer.UserId) .. "&w=48&h=48",
+			Theme = { BackgroundColor3 = "Field" },
+			Parent = FootLeft,
+		}, { S.corner(9), S.stroke("BorderLight") })
+		self_.Avatar = Avatar
+		footText(FootLeft, LocalPlayer.DisplayName, 2, "Text", S.FontSemi)
+		if options.Badge then
+			local Badge = S.create("Frame", {
+				Size = UDim2.fromOffset(0, 16),
+				AutomaticSize = Enum.AutomaticSize.X,
+				LayoutOrder = 3,
+				ZIndex = 2,
+				Theme = { BackgroundColor3 = "Field" },
+				Parent = FootLeft,
+			}, { S.corner(8), S.stroke("BorderLight"), S.padding(0, 7, 0, 7) })
+			local BadgeText = S.label({
+				Text = string.upper(tostring(options.Badge)),
+				FontFace = S.FontBold,
+				TextSize = 9.5,
+				AutomaticSize = Enum.AutomaticSize.X,
+				Size = UDim2.fromOffset(0, 16),
+				ZIndex = 2,
+				Theme = { TextColor3 = "Silver" },
+				Parent = Badge,
+			})
+			self_.BadgeLabel = BadgeText
+		else
+			footText(FootLeft, "@" .. tostring(LocalPlayer.Name), 3)
+		end
+	end
+	local FooterDot = footText(FootLeft, "·", 4)
+	local FooterText = footText(FootLeft, options.Footer or "", 5)
+	FooterDot.Visible = (options.Footer or "") ~= "" and options.User ~= false
+	self_.FooterLabel, self_.FooterDot = FooterText, FooterDot
+	local FootRight = S.create("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -22, 0, 0),
+		Size = UDim2.new(0.4, -22, 1, 0),
+		ZIndex = 2,
+		Parent = Foot,
+	}, { S.list(10, true, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	local FooterRight = footText(FootRight, options.FooterRight or "", 1)
+	FooterRight.Visible = (options.FooterRight or "") ~= ""
+	self_.FooterRightLabel = FooterRight
+	local FpsText = footText(FootRight, "0 fps", 2, "SubText", S.FontMono)
+	local PingText = footText(FootRight, "0 ms", 3, "SubText", S.FontMono)
+	table.insert(S.PerfListeners, function(perf)
+		FpsText.Text = perf.Fps .. " fps"
+		PingText.Text = perf.Ping .. " ms"
+	end)
 
 	local Grip = S.create("TextButton", {
 		Text = "",
@@ -330,7 +449,12 @@ function Library:CreateWindow(options)
 		S.connect(UserInputService.InputChanged, function(input)
 			if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 				local delta = (input.Position - startPos) / math.max(Scale.Scale, 0.1)
-				Main.Size = UDim2.fromOffset(math.max(startSize.X + delta.X * 2, 520), math.max(startSize.Y + delta.Y * 2, 340))
+				local screen = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+				local fit = math.max(Scale.Scale, 0.1)
+				Main.Size = UDim2.fromOffset(
+					math.clamp(startSize.X + delta.X * 2, math.min(520, width), math.max((screen.X - 24) / fit, 520)),
+					math.clamp(startSize.Y + delta.Y * 2, math.min(340, height), math.max((screen.Y - 24) / fit, 340))
+				)
 			end
 		end)
 	end
@@ -388,6 +512,15 @@ function Library:CreateWindow(options)
 	S.applyScale = function()
 		Scale.Scale = self.Scale
 	end
+	if options.AutoShow == false or (self.GetSilentLoad and self:GetSilentLoad()) then
+		self.Open = false
+		Main.Visible = false
+		task.defer(function()
+			if S.onToggle and not self.Open then
+				S.onToggle(false)
+			end
+		end)
+	end
 	return self_
 end
 
@@ -430,6 +563,9 @@ function Library:SetScale(scale)
 	if S.applyScale then
 		S.applyScale()
 	end
+	for _, hud in ipairs(S.ScaledHud or {}) do
+		hud.Scale = self.Scale
+	end
 end
 
 function Library:SetStarfield(on)
@@ -445,26 +581,95 @@ function Library:SetGame(text)
 	end
 end
 
+function Library:SetSubtitle(text)
+	self:SetGame(text)
+end
+
+function Library:SetFooter(text)
+	local w = S.Window
+	if w then
+		w.FooterLabel.Text = tostring(text or "")
+		w.FooterDot.Visible = w.FooterLabel.Text ~= "" and w.Avatar ~= nil
+	end
+end
+
+function Library:SetFooterRight(text)
+	local w = S.Window
+	if w then
+		w.FooterRightLabel.Text = tostring(text or "")
+		w.FooterRightLabel.Visible = w.FooterRightLabel.Text ~= ""
+	end
+end
+
+function Library:SetBadge(text)
+	local w = S.Window
+	if w and w.BadgeLabel then
+		w.BadgeLabel.Text = string.upper(tostring(text or ""))
+	end
+end
+
+function Library:SetToggleKey(key)
+	local code = S.keyCode(key)
+	if code then
+		self.ToggleKey = code
+		if S.saveMenu then
+			S.saveMenu()
+		end
+	end
+	return code ~= nil
+end
+
+function Window:Toggle(state)
+	Library:Toggle(state)
+end
+
+function Window:GetTab(name)
+	for _, tab in ipairs(self.Tabs) do
+		if tab.Name == name then
+			return tab
+		end
+	end
+	return nil
+end
+
 function Window:SetTitle(text)
 	self.TitleLabel.Text = tostring(text)
 end
 
-function Window:AddSection()
-	local Sep = S.create("Frame", {
+function Window:AddSection(name)
+	self.SectionCount = (self.SectionCount or 0) + 1
+	local order = #self.Tabs * 2 + 1
+	local Holder = S.create("Frame", {
 		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(13, 24),
-		LayoutOrder = #self.Tabs * 2 + 1,
+		Size = UDim2.fromOffset(0, 24),
+		AutomaticSize = Enum.AutomaticSize.X,
+		LayoutOrder = order,
 		Parent = self.Strip,
-	})
-	S.create("Frame", {
-		BorderSizePixel = 0,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(1, 18),
-		Theme = { BackgroundColor3 = "BorderLight" },
-		Parent = Sep,
-	})
-	return Sep
+	}, { S.list(8, true, { VerticalAlignment = Enum.VerticalAlignment.Center }), S.padding(0, 4, 0, #self.Tabs > 0 and 4 or 2) })
+	if #self.Tabs > 0 then
+		S.create("Frame", {
+			BorderSizePixel = 0,
+			Size = UDim2.fromOffset(1, 18),
+			LayoutOrder = 1,
+			Theme = { BackgroundColor3 = "BorderLight" },
+			Parent = Holder,
+		})
+	end
+	if name and name ~= "" then
+		S.label({
+			Text = string.upper(tostring(name)),
+			FontFace = S.FontBold,
+			TextSize = 9.5,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 24),
+			LayoutOrder = 2,
+			ZIndex = 2,
+			Theme = { TextColor3 = "Muted" },
+			Parent = Holder,
+		})
+	end
+	self.Section = name
+	return Holder
 end
 
 function Window:MoveGlide(tab, instant)
@@ -537,6 +742,9 @@ function Window:SelectTab(tab)
 end
 
 function Window:AddTab(name, icon)
+	if type(icon) == "table" then
+		icon = icon.Icon
+	end
 	local tab = setmetatable({ Name = name, Window = self, Groupboxes = {} }, Tab)
 	local order = #self.Tabs * 2 + 2
 	local Button = S.create("TextButton", {
@@ -553,6 +761,7 @@ function Window:AddTab(name, icon)
 		S.list(8, true, { VerticalAlignment = Enum.VerticalAlignment.Center }),
 	})
 	local Glyph = Library:Icon(Button, icon or "misc", 16, { LayoutOrder = 1, ZIndex = 2, Theme = { ImageColor3 = "Muted" } })
+	Glyph.Visible = self.TabIcons ~= false and icon ~= false
 	local Label = S.label({
 		Text = name,
 		FontFace = S.FontSemi,
@@ -566,39 +775,50 @@ function Window:AddTab(name, icon)
 	})
 	tab.Button, tab.Glyph, tab.Label = Button, Glyph, Label
 
-	local Page = S.create("ScrollingFrame", {
+	local Page = S.create("Frame", {
 		Name = name,
 		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
 		Size = UDim2.fromScale(1, 1),
-		CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3,
-		ScrollBarImageTransparency = 0.6,
 		Visible = false,
 		ZIndex = 2,
 		Parent = self.Pages,
-	}, { S.padding(14, 14, 14, 14) })
-	S.themed(Page, { ScrollBarImageColor3 = "BorderLight" })
-	local Columns = S.create("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		ZIndex = 2,
-		Parent = Page,
 	})
-	local function column(x)
-		return S.create("Frame", {
+	local function column(left)
+		local Scroller = S.create("ScrollingFrame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.new(x, x > 0 and 6 or 0, 0, 0),
-			Size = UDim2.new(0.5, -6, 0, 0),
+			BorderSizePixel = 0,
+			Position = left and UDim2.fromOffset(12, 0) or UDim2.new(0.5, 4, 0, 0),
+			Size = UDim2.new(0.5, -16, 1, 0),
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			ScrollBarThickness = 2,
+			ScrollBarImageTransparency = 0.5,
+			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+			ZIndex = 2,
+			Parent = Page,
+		})
+		S.themed(Scroller, { ScrollBarImageColor3 = "BorderLight" })
+		local Holder = S.create("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(2, 12),
+			Size = UDim2.new(1, -4, 0, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			ZIndex = 2,
-			Parent = Columns,
+			Parent = Scroller,
 		}, { S.list(12) })
+		S.create("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(1, 0),
+			LayoutOrder = 1000000,
+			Parent = Holder,
+		})
+		return Holder, Scroller
 	end
-	tab.Page, tab.Left, tab.Right = Page, column(0), column(0.5)
+	local Left, LeftScroll = column(true)
+	local Right, RightScroll = column(false)
+	tab.Page, tab.Left, tab.Right = Page, Left, Right
+	tab.LeftScroll, tab.RightScroll = LeftScroll, RightScroll
 
 	S.connect(Button.MouseEnter, function()
 		if self.Selected ~= tab then
